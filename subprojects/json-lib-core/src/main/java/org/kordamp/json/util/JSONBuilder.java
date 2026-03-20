@@ -18,6 +18,8 @@
 package org.kordamp.json.util;
 
 import org.kordamp.json.JSONException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Writer;
@@ -52,7 +54,9 @@ import java.io.Writer;
  * <p/>
  * The first method called must be <code>array</code> or <code>object</code>.
  * There are no methods for adding commas or colons. JSONBuilder adds them for
- * you. Objects and arrays can be nested up to 20 levels deep.
+ * you. Objects and arrays can be nested up to 100 levels deep by default.
+ * This limit can be changed with the <code>json.maxDepth</code> system
+ * property.
  * <p/>
  * This can sometimes be easier than using a JSONObject to build a string.
  *
@@ -60,7 +64,18 @@ import java.io.Writer;
  * @version 1
  */
 public class JSONBuilder {
-    private static final int MAXDEPTH = 20;
+    private static final Logger LOG = LoggerFactory.getLogger(JSONBuilder.class);
+    /**
+     * Historical default kept for compatibility with the GeoServer json-lib
+     * 2.4.x fork (net.sf.json.util.JSONBuilder), where max depth became
+     * configurable and defaulted to 100.
+     */
+    private static final int MAXDEPTH_DEFAULT = 100;
+    /**
+     * Safety cap for user-provided values from -Djson.maxDepth to avoid large
+     * allocations from unbounded values.
+     */
+    private static final int MAXDEPTH_ALLOWED = 10_000;
     /**
      * The current mode. Values: 'a' (array), 'd' (done), 'i' (initial), 'k'
      * (key), 'o' (object).
@@ -80,6 +95,10 @@ public class JSONBuilder {
      */
     private char stack[];
     /**
+     * Maximum allowed nesting depth for this builder.
+     */
+    private final int maxDepth;
+    /**
      * The stack top index. A value of 0 indicates that the stack is empty.
      */
     private int top;
@@ -88,9 +107,10 @@ public class JSONBuilder {
      * Make a fresh JSONBuilder. It can be used to build one JSON text.
      */
     public JSONBuilder(Writer w) {
+        this.maxDepth = getMaxDepth();
         this.comma = false;
         this.mode = 'i';
-        this.stack = new char[MAXDEPTH];
+        this.stack = new char[maxDepth];
         this.top = 0;
         this.writer = w;
     }
@@ -275,7 +295,7 @@ public class JSONBuilder {
      * @throws JSONException If nesting is too deep.
      */
     private void push(char c) {
-        if (this.top >= MAXDEPTH) {
+        if (this.top >= maxDepth) {
             throw new JSONException("Nesting too deep.");
         }
         this.stack[this.top] = c;
@@ -336,5 +356,61 @@ public class JSONBuilder {
      */
     public JSONBuilder value(Object o) {
         return this.append(JSONUtils.valueToString(o));
+    }
+
+    /**
+     * Resolves the builder max depth from the legacy system property
+     * {@code json.maxDepth}. This property name and fallback behavior are kept
+     * for backward compatibility with json-lib 2.4.x deployments.
+     * <p>
+     * Accepted values:
+     * <ul>
+     *   <li>{@code null} or invalid ({@code <= 0}, non-numeric): falls back to
+     *   {@value #MAXDEPTH_DEFAULT}</li>
+     *   <li>positive numbers: accepted as-is up to
+     *   {@value #MAXDEPTH_ALLOWED}</li>
+     *   <li>values above {@value #MAXDEPTH_ALLOWED}: clamped to
+     *   {@value #MAXDEPTH_ALLOWED}</li>
+     * </ul>
+     *
+     * @return the configured max depth currently used by new
+     *         {@code JSONBuilder} instances.
+     */
+    static int getMaxDepth() {
+        return resolveMaxDepthFromSystemProperty();
+    }
+
+    /**
+     * Retained for backward compatibility with tests that explicitly trigger
+     * reloading of runtime properties. Max depth is now resolved on demand by
+     * {@link #getMaxDepth()}, so this method intentionally has no effect.
+     */
+    static void reloadMaxDepth() {
+        // no-op: max depth is resolved per lookup
+    }
+
+    private static int resolveMaxDepthFromSystemProperty() {
+        final String maxDepthProperty = System.getProperty("json.maxDepth");
+        if (maxDepthProperty == null) {
+            return MAXDEPTH_DEFAULT;
+        }
+
+        try {
+            final int max = Integer.parseInt(maxDepthProperty.trim());
+            if (max <= 0) {
+                LOG.warn("Bad value for 'json.maxDepth' system property, it must be greater than zero. Current value: {}", max);
+                return MAXDEPTH_DEFAULT;
+            }
+            if (max > MAXDEPTH_ALLOWED) {
+                // Clamp instead of failing to preserve compatibility while
+                // preventing pathological allocations.
+                LOG.warn("Clamping 'json.maxDepth' to {} (requested {})", MAXDEPTH_ALLOWED, max);
+                return MAXDEPTH_ALLOWED;
+            }
+            return max;
+        } catch (NumberFormatException e) {
+            LOG.warn("Bad number format for 'json.maxDepth' system property: {}", maxDepthProperty);
+            return MAXDEPTH_DEFAULT;
+        }
     }
 }

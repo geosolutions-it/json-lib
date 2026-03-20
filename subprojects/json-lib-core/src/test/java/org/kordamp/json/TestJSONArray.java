@@ -61,6 +61,34 @@ public class TestJSONArray extends TestCase {
         assertFalse(jsonArray.contains("1"));
     }
 
+    public void testObjectTypedStringStripsOuterSingleQuotesByDefaultWithElementAndConfig() {
+        String original = System.getProperty(AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY);
+        try {
+            System.clearProperty(AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY);
+            AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
+
+            JSONArray json = new JSONArray().element((Object) "'[STATE_ABBR]'", new JsonConfig());
+            assertEquals("[STATE_ABBR]", json.getString(0));
+            assertEquals("[\"[STATE_ABBR]\"]", json.toString());
+        } finally {
+            restoreSingleQuoteCompatibilityProperty(original);
+        }
+    }
+
+    public void testObjectTypedStringPreservesOuterSingleQuotesWithElementAndConfigWhenCompatibilityDisabled() {
+        String original = System.getProperty(AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY);
+        try {
+            System.setProperty(AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY, "false");
+            AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
+
+            JSONArray json = new JSONArray().element((Object) "'[STATE_ABBR]'", new JsonConfig());
+            assertEquals("'[STATE_ABBR]'", json.getString(0));
+            assertEquals("[\"'[STATE_ABBR]'\"]", json.toString());
+        } finally {
+            restoreSingleQuoteCompatibilityProperty(original);
+        }
+    }
+
     public void testConstructor_Collection() {
         List l = new ArrayList();
         l.add(Boolean.TRUE);
@@ -1447,6 +1475,15 @@ public class TestJSONArray extends TestCase {
         StringWriter sw = new StringWriter();
         jsonArray.write(sw);
         assertEquals("[[],{},1,true,\"json\"]", sw.toString());
+    }
+
+    private void restoreSingleQuoteCompatibilityProperty(String original) {
+        if (original == null) {
+            System.clearProperty(AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY);
+        } else {
+            System.setProperty(AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY, original);
+        }
+        AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
     }
 
     private MorphDynaBean createDynaBean() throws Exception {

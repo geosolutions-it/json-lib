@@ -99,6 +99,12 @@ config {
     }
 }
 
+ext.disableLicenseChecks = (findProperty('disableLicenseChecks')?.toString()?.toBoolean() ?: false)
+ext.isForkLicenseCheckTask = { Task task ->
+    task.name == 'license' ||
+        (task.name.startsWith('license') && !task.name.startsWith('licenseFormat'))
+}
+
 allprojects {
     repositories {
         mavenLocal()
@@ -110,6 +116,16 @@ allprojects {
 
     tasks.withType(JavaCompile) {
         options.encoding = 'UTF-8'
+    }
+}
+
+gradle.projectsEvaluated {
+    if (rootProject.ext.disableLicenseChecks) {
+        allprojects { p ->
+            p.tasks.matching(rootProject.ext.isForkLicenseCheckTask).configureEach {
+                enabled = false
+            }
+        }
     }
 }
 

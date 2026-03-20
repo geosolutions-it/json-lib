@@ -117,6 +117,17 @@ import java.util.Set;
  */
 public final class JSONObject extends AbstractJSON implements JSON, Map<String, Object>, Comparable {
     private static final long serialVersionUID = 1997944501504436316L;
+    /**
+     * System property that controls backward-compatible normalization of
+     * object-typed String values surrounded by single quotes.
+     * <p>
+     * When enabled (default {@code true}), values like {@code "'abc'"} passed
+     * through programmatic APIs such as {@link #element(String, Object, JsonConfig)}
+     * and {@link #accumulate(String, Object, JsonConfig)} are normalized to
+     * {@code "abc"} to preserve json-lib 2.x behavior.
+     */
+    public static final String LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY =
+        AbstractJSON.LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY;
 
     private static final Logger LOG = LoggerFactory.getLogger(JSONObject.class);
     /**
@@ -725,10 +736,14 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
                         }
                         if (jsonPropertyFilter == null || !jsonPropertyFilter.apply(tokener, key, v)) {
                             if (jsonObject.properties.containsKey(key)) {
-                                jsonObject.accumulate(key, v, jsonConfig);
+                                // Parsed JSON text should not go through
+                                // programmatic single-quote normalization.
+                                jsonObject.accumulateInternal(key, v, jsonConfig, false);
                                 firePropertySetEvent(key, v, true, jsonConfig);
                             } else {
-                                jsonObject.element(key, v, jsonConfig);
+                                // Parsed JSON text should not go through
+                                // programmatic single-quote normalization.
+                                jsonObject.element(key, v, jsonConfig, false);
                                 firePropertySetEvent(key, v, false, jsonConfig);
                             }
                         }
@@ -765,10 +780,10 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
                             (params != null) ? StringUtils.split(params, ",") : null, text);
                         if (jsonPropertyFilter == null || !jsonPropertyFilter.apply(tokener, key, value)) {
                             if (jsonObject.properties.containsKey(key)) {
-                                jsonObject.accumulate(key, value, jsonConfig);
+                                jsonObject.accumulateInternal(key, value, jsonConfig, false);
                                 firePropertySetEvent(key, value, true, jsonConfig);
                             } else {
-                                jsonObject.element(key, value, jsonConfig);
+                                jsonObject.element(key, value, jsonConfig, false);
                                 firePropertySetEvent(key, value, false, jsonConfig);
                             }
                         }
@@ -1321,6 +1336,11 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      * is stored under the key to hold all of the accumulated values. If there is
      * already a JSONArray, then the new value is appended to it. In contrast,
      * the replace method replaces the previous value.
+     * <p>
+     * For backward compatibility with json-lib 2.x / GeoServer integrations,
+     * object-typed String values enclosed in single quotes are normalized by
+     * default. This behavior is controlled by
+     * {@link #LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY} (default {@code true}).
      *
      * @param key   A key string.
      * @param value An object to be accumulated under the key.
@@ -1331,7 +1351,7 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject accumulate(String key, boolean value) {
-        return _accumulate(key, value ? Boolean.TRUE : Boolean.FALSE, new JsonConfig());
+        return accumulateInternal(key, value ? Boolean.TRUE : Boolean.FALSE, new JsonConfig());
     }
 
     // ------------------------------------------------------
@@ -1352,7 +1372,7 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject accumulate(String key, double value) {
-        return _accumulate(key, Double.valueOf(value), new JsonConfig());
+        return accumulateInternal(key, Double.valueOf(value), new JsonConfig());
     }
 
     /**
@@ -1371,7 +1391,7 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject accumulate(String key, int value) {
-        return _accumulate(key, Integer.valueOf(value), new JsonConfig());
+        return accumulateInternal(key, Integer.valueOf(value), new JsonConfig());
     }
 
     /**
@@ -1390,7 +1410,7 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject accumulate(String key, long value) {
-        return _accumulate(key, Long.valueOf(value), new JsonConfig());
+        return accumulateInternal(key, Long.valueOf(value), new JsonConfig());
     }
 
     /**
@@ -1409,7 +1429,7 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject accumulate(String key, Object value) {
-        return _accumulate(key, value, new JsonConfig());
+        return accumulateInternal(key, value, new JsonConfig());
     }
 
     /**
@@ -1428,7 +1448,7 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject accumulate(String key, Object value, JsonConfig jsonConfig) {
-        return _accumulate(key, value, jsonConfig);
+        return accumulateInternal(key, value, jsonConfig, true);
     }
 
     public void accumulateAll(Map map) {
@@ -1675,6 +1695,11 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      * Put a key/value pair in the JSONObject. If the value is null, then the key
      * will be removed from the JSONObject if it is present.<br>
      * If there is a previous value assigned to the key, it will call accumulate.
+     * <p>
+     * For backward compatibility with json-lib 2.x / GeoServer integrations,
+     * object-typed String values enclosed in single quotes are normalized by
+     * default. This behavior is controlled by
+     * {@link #LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY} (default {@code true}).
      *
      * @param key   A key string.
      * @param value An object which is the value. It should be of one of these
@@ -1706,11 +1731,33 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
      *                       null.
      */
     public JSONObject element(String key, Object value, JsonConfig jsonConfig) {
+        return element(key, value, jsonConfig, true);
+    }
+
+    /**
+     * Internal variant used to control json-lib 2.x string compatibility
+     * normalization.
+     *
+     * @param key                        the key to set
+     * @param value                      the raw value to store
+     * @param jsonConfig                 serialization/deserialization config
+     * @param normalizeLegacyStringValue true when this value comes from
+     *                                   programmatic API calls (legacy
+     *                                   normalization applies), false when the
+     *                                   value already comes from parsed JSON
+     *                                   tokens.
+     *
+     * @return this object
+     */
+    JSONObject element(String key, Object value, JsonConfig jsonConfig, boolean normalizeLegacyStringValue) {
         verifyIsNull();
         if (key == null) {
             throw new JSONException("Null key.");
         }
         if (value != null) {
+            if (normalizeLegacyStringValue && value instanceof String) {
+                value = normalizeLegacySingleQuotedStringValue((String) value);
+            }
             value = processValue(key, value, jsonConfig);
             _setInternal(key, value, jsonConfig);
         } else {
@@ -2510,9 +2557,31 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
         return ja;
     }
 
-    private JSONObject _accumulate(String key, Object value, JsonConfig jsonConfig) {
+    private JSONObject accumulateInternal(String key, Object value, JsonConfig jsonConfig) {
+        return accumulateInternal(key, value, jsonConfig, true);
+    }
+
+    /**
+     * Internal accumulate variant with explicit control over json-lib 2.x
+     * string compatibility normalization.
+     *
+     * @param key                        the key to accumulate under
+     * @param value                      the value to accumulate
+     * @param jsonConfig                 serialization/deserialization config
+     * @param normalizeLegacyStringValue true for programmatic API values
+     *                                   (legacy single-quote normalization may
+     *                                   apply), false for values coming from
+     *                                   JSON parser tokens
+     *
+     * @return this object
+     */
+    JSONObject accumulateInternal(String key, Object value, JsonConfig jsonConfig, boolean normalizeLegacyStringValue) {
         if (isNullObject()) {
             throw new JSONException("Can't accumulate on null object");
+        }
+
+        if (normalizeLegacyStringValue && value instanceof String) {
+            value = normalizeLegacySingleQuotedStringValue((String) value);
         }
 
         if (!has(key)) {
@@ -2520,10 +2589,10 @@ public final class JSONObject extends AbstractJSON implements JSON, Map<String, 
         } else {
             Object o = opt(key);
             if (o instanceof JSONArray) {
-                ((JSONArray) o).element(value, jsonConfig);
+                ((JSONArray) o).element(value, jsonConfig, normalizeLegacyStringValue);
             } else {
                 setInternal(key, new JSONArray().element(o)
-                    .element(value, jsonConfig), jsonConfig);
+                    .element(value, jsonConfig, normalizeLegacyStringValue), jsonConfig);
             }
         }
 

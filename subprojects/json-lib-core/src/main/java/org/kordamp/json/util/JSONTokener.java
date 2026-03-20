@@ -36,6 +36,17 @@ import org.kordamp.json.regexp.RegexpUtils;
  */
 public class JSONTokener {
     /**
+     * Compatibility switch for numeric coercion semantics inherited from
+     * json-lib 2.x, which in turn aligned with commons-lang 2.6
+     * (org.apache.commons.lang.math.NumberUtils) behavior.
+     * <p>
+     * Default is true to preserve historical rounding/coercion patterns.
+     */
+    public static final String LEGACY_NUMBER_COERCION_PROPERTY = "json.compatibility.legacyNumberCoercion";
+    private static volatile boolean legacyNumberCoercionEnabled =
+        Boolean.parseBoolean(System.getProperty(LEGACY_NUMBER_COERCION_PROPERTY, "true"));
+
+    /**
      * The index of the next character.
      */
     private int myIndex;
@@ -433,7 +444,7 @@ public class JSONTokener {
             }
 
             try {
-                return NumberUtils.createNumber(s);
+                return createNumber(s);
             } catch (Exception e) {
                 return s;
             }
@@ -527,5 +538,155 @@ public class JSONTokener {
      */
     public String toString() {
         return " at character " + this.myIndex + " of " + this.mySource;
+    }
+
+    /**
+     * Parses numbers honoring the optional compatibility mode.
+     * <p>
+     * Legacy mode intentionally preserves json-lib 2.x coercion behavior that
+     * users observed with commons-lang 2.6 number parsing rules. Non-legacy
+     * mode delegates directly to commons-lang3 NumberUtils.
+     * Compatibility mode is controlled by
+     * {@link #LEGACY_NUMBER_COERCION_PROPERTY} (default {@code true}).
+     *
+     * @param str number token text
+     *
+     * @return a parsed {@link Number}
+     *
+     * @throws NumberFormatException if the token is malformed
+     */
+    private static Number createNumber(String str) {
+        if (!isLegacyNumberCoercionEnabled()) {
+            return NumberUtils.createNumber(str);
+        }
+
+        char lastChar = str.charAt(str.length() - 1);
+        boolean requestType = !Character.isDigit(lastChar) && lastChar != '.';
+        int decPos = str.indexOf('.');
+        // Classic commons-lang 2.x trick: indexOf() returns -1 when absent, so
+        // when exactly one of 'e'/'E' exists this resolves to its index.
+        // If both appear (malformed input), the computed position is invalid.
+        int expPos = str.indexOf('e') + str.indexOf('E') + 1;
+
+        if (!requestType && decPos < 0 && expPos < 0) {
+            return NumberUtils.createNumber(str);
+        }
+
+        return parseFloatingPoint(str, lastChar, requestType, decPos, expPos);
+    }
+
+    private static Number parseFloatingPoint(String str, char lastChar, boolean requestType, int decPos, int expPos) {
+        String mant = getMantissaForFloatingPoint(str, requestType, decPos, expPos);
+
+        if (requestType) {
+            String exp = expPos > -1 && expPos < str.length() - 1 ? str.substring(expPos + 1, str.length() - 1) : null;
+            String numeric = str.substring(0, str.length() - 1);
+            boolean allZeros = isAllZeros(mant) && isAllZeros(exp);
+            switch (lastChar) {
+                case 'f':
+                case 'F':
+                    try {
+                        Float f = NumberUtils.createFloat(numeric);
+                        if (!(f.isInfinite() || (f.floatValue() == 0.0F && !allZeros))) {
+                            return f;
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // ignore the bad number
+                    }
+                    // fall through
+                case 'd':
+                case 'D':
+                    try {
+                        Double d = NumberUtils.createDouble(numeric);
+                        if (!(d.isInfinite() || (d.doubleValue() == 0.0D && !allZeros))) {
+                            return d;
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // ignore the bad number
+                    }
+                    return NumberUtils.createBigDecimal(numeric);
+                default:
+                    return NumberUtils.createNumber(str);
+            }
+        }
+
+        String exp = expPos > -1 && expPos < str.length() - 1 ? str.substring(expPos + 1) : null;
+        boolean allZeros = isAllZeros(mant) && isAllZeros(exp);
+        try {
+            Float f = NumberUtils.createFloat(str);
+            if (!(f.isInfinite() || (f.floatValue() == 0.0F && !allZeros))) {
+                return f;
+            }
+        } catch (NumberFormatException ignored) {
+            // ignore the bad number
+        }
+        try {
+            Double d = NumberUtils.createDouble(str);
+            if (!(d.isInfinite() || (d.doubleValue() == 0.0D && !allZeros))) {
+                return d;
+            }
+        } catch (NumberFormatException ignored) {
+            // ignore the bad number
+        }
+        return NumberUtils.createBigDecimal(str);
+    }
+
+    private static String getMantissaForFloatingPoint(String str, boolean requestType, int decPos, int expPos) {
+        if (decPos > -1) {
+            if (expPos > -1) {
+                if (expPos < decPos || expPos > str.length()) {
+                    throw new NumberFormatException(str + " is not a valid number.");
+                }
+            }
+            return getMantissa(str, decPos);
+        }
+
+        if (expPos > -1) {
+            if (expPos > str.length()) {
+                throw new NumberFormatException(str + " is not a valid number.");
+            }
+            return getMantissa(str, expPos);
+        }
+        return getMantissa(str, requestType ? str.length() - 1 : str.length());
+    }
+
+    private static String getMantissa(String str, int stopPos) {
+        char firstChar = str.charAt(0);
+        boolean hasSign = firstChar == '-' || firstChar == '+';
+        if (str.length() <= (hasSign ? 1 : 0) || str.length() < stopPos) {
+            throw new NumberFormatException(str + " is not a valid number.");
+        }
+        return hasSign ? str.substring(1, stopPos) : str.substring(0, stopPos);
+    }
+
+    private static boolean isAllZeros(String str) {
+        if (str == null) {
+            return true;
+        }
+        for (int i = str.length() - 1; i >= 0; i--) {
+            if (str.charAt(i) != '0') {
+                return false;
+            }
+        }
+        return str.length() > 0;
+    }
+
+    /**
+     * Defaults to true for backward compatibility with json-lib 2.x numeric
+     * coercion behavior.
+     */
+    private static boolean isLegacyNumberCoercionEnabled() {
+        return legacyNumberCoercionEnabled;
+    }
+
+    /**
+     * Reloads the numeric compatibility flag from the current system property
+     * value. This is mainly useful in tests that toggle the property at
+     * runtime.
+     */
+    public static void reloadLegacyNumberCoercionCompatibility() {
+        legacyNumberCoercionEnabled = Boolean.parseBoolean(System.getProperty(
+            LEGACY_NUMBER_COERCION_PROPERTY,
+            "true"));
     }
 }

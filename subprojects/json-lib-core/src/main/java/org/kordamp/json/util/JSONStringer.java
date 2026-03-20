@@ -49,7 +49,9 @@ import java.io.StringWriter;
  * <p/>
  * The first method called must be <code>array</code> or <code>object</code>.
  * There are no methods for adding commas or colons. JSONStringer adds them for
- * you. Objects and arrays can be nested up to 20 levels deep.
+ * you. Objects and arrays can be nested up to 100 levels deep by default.
+ * This limit can be changed with the <code>json.maxDepth</code> system
+ * property.
  * <p/>
  * This can sometimes be easier than using a JSONObject to build a string.
  *

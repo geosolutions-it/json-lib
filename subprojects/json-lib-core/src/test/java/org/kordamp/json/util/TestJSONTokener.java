@@ -32,6 +32,13 @@ public class TestJSONTokener extends TestCase {
         junit.textui.TestRunner.run(TestJSONTokener.class);
     }
 
+    @Override
+    protected void tearDown() throws Exception {
+        System.clearProperty(JSONTokener.LEGACY_NUMBER_COERCION_PROPERTY);
+        JSONTokener.reloadLegacyNumberCoercionCompatibility();
+        super.tearDown();
+    }
+
     public void testDehexchar() {
         assertEquals(0, JSONTokener.dehexchar('0'));
         assertEquals(1, JSONTokener.dehexchar('1'));
@@ -96,5 +103,25 @@ public class TestJSONTokener extends TestCase {
         assertEquals('c', tok.next());
         tok.reset();
         assertEquals('a', tok.next());
+    }
+
+    public void testNextValueLegacyNumberCoercionEnabledByDefault() {
+        JSONTokener tok = new JSONTokener("1.100000023841858");
+
+        Object value = tok.nextValue();
+
+        assertTrue(value instanceof Float);
+        assertEquals(1.1f, ((Float) value).floatValue(), 0f);
+    }
+
+    public void testNextValueLegacyNumberCoercionCanBeDisabled() {
+        System.setProperty(JSONTokener.LEGACY_NUMBER_COERCION_PROPERTY, "false");
+        JSONTokener.reloadLegacyNumberCoercionCompatibility();
+        JSONTokener tok = new JSONTokener("1.100000023841858");
+
+        Object value = tok.nextValue();
+
+        assertTrue(value instanceof Double);
+        assertEquals(1.100000023841858d, ((Double) value).doubleValue(), 0d);
     }
 }

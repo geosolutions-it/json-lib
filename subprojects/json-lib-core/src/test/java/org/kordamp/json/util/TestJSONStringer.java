@@ -19,18 +19,39 @@ package org.kordamp.json.util;
 
 import junit.framework.TestCase;
 import org.kordamp.json.JSONFunction;
+import org.kordamp.json.JSONException;
 import org.kordamp.json.JSONObject;
 
 /**
  * @author Andres Almiray
  */
 public class TestJSONStringer extends TestCase {
+    private String originalMaxDepth;
+
     public TestJSONStringer(String testName) {
         super(testName);
     }
 
     public static void main(String[] args) {
         junit.textui.TestRunner.run(TestJSONStringer.class);
+    }
+
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        originalMaxDepth = System.getProperty("json.maxDepth");
+        JSONBuilder.reloadMaxDepth();
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        if (originalMaxDepth == null) {
+            System.clearProperty("json.maxDepth");
+        } else {
+            System.setProperty("json.maxDepth", originalMaxDepth);
+        }
+        JSONBuilder.reloadMaxDepth();
+        super.tearDown();
     }
 
     public void testCreateArray() {
@@ -92,5 +113,29 @@ public class TestJSONStringer extends TestCase {
         assertTrue(JSONUtils.isFunction(jsonObj.get("func")));
         assertEquals("function(){ var a = 1; }", jsonObj.get("func")
             .toString());
+    }
+
+    public void testConfiguredMaxDepthIsApplied() {
+        System.setProperty("json.maxDepth", "30");
+        JSONBuilder.reloadMaxDepth();
+
+        JSONBuilder builder = new JSONStringer();
+        for (int i = 0; i < 30; i++) {
+            builder.array();
+        }
+        builder.value(1);
+        for (int i = 0; i < 30; i++) {
+            builder.endArray();
+        }
+
+        try {
+            JSONBuilder overflow = new JSONStringer();
+            for (int i = 0; i < 31; i++) {
+                overflow.array();
+            }
+            fail("Expected depth overflow at 31");
+        } catch (JSONException e) {
+            assertEquals("Nesting too deep.", e.getMessage());
+        }
     }
 }

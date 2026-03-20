@@ -1159,7 +1159,9 @@ public final class JSONArray extends AbstractJSON implements JSON, List<Object>,
                         tokener.back();
                         Object v = tokener.nextValue(jsonConfig);
                         if (!JSONUtils.isFunctionHeader(v)) {
-                            jsonArray.addValue(v, jsonConfig);
+                            // Parsed JSON text should not go through
+                            // programmatic single-quote normalization.
+                            jsonArray.addValue(v, jsonConfig, false);
                             fireElementAddedEvent(index, jsonArray.get(index++), jsonConfig);
                         } else {
                             // read params if any
@@ -1190,7 +1192,9 @@ public final class JSONArray extends AbstractJSON implements JSON, List<Object>,
                             String text = sb.toString();
                             text = text.substring(1, text.length() - 1)
                                 .trim();
-                            jsonArray.addValue(new JSONFunction((params != null) ? params.split(",") : null, text), jsonConfig);
+                            // Parsed JSON text should not go through
+                            // programmatic single-quote normalization.
+                            jsonArray.addValue(new JSONFunction((params != null) ? params.split(",") : null, text), jsonConfig, false);
                             fireElementAddedEvent(index, jsonArray.get(index++), jsonConfig);
                         }
                     }
@@ -1819,6 +1823,12 @@ public final class JSONArray extends AbstractJSON implements JSON, List<Object>,
 
     /**
      * Append an object value. This increases the array's length by one.
+     * <p>
+     * For backward compatibility with json-lib 2.x / GeoServer integrations,
+     * object-typed String values enclosed in single quotes are normalized by
+     * default. This behavior is controlled by
+     * {@link JSONObject#LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY}
+     * (default {@code true}).
      *
      * @param value An object value. The value should be a Boolean, Double,
      *              Integer, JSONArray, JSONObject, JSONFunction, Long, String,
@@ -1840,7 +1850,7 @@ public final class JSONArray extends AbstractJSON implements JSON, List<Object>,
      * @return this.
      */
     public JSONArray element(Object value, JsonConfig jsonConfig) {
-        return addValue(value, jsonConfig);
+        return addValue(value, jsonConfig, true);
     }
 
     /**
@@ -2592,7 +2602,23 @@ public final class JSONArray extends AbstractJSON implements JSON, List<Object>,
      *
      * @return this.
      */
+    JSONArray element(Object value, JsonConfig jsonConfig, boolean normalizeLegacyStringValue) {
+        return addValue(value, jsonConfig, normalizeLegacyStringValue);
+    }
+
     private JSONArray addValue(Object value, JsonConfig jsonConfig) {
+        return addValue(value, jsonConfig, true);
+    }
+
+    /**
+     * Internal append variant used to preserve json-lib 2.x string
+     * compatibility behavior on programmatic API calls while skipping that
+     * normalization for parsed JSON tokens.
+     */
+    private JSONArray addValue(Object value, JsonConfig jsonConfig, boolean normalizeLegacyStringValue) {
+        if (normalizeLegacyStringValue && value instanceof String) {
+            value = normalizeLegacySingleQuotedStringValue((String) value);
+        }
         return _addValue(processValue(value, jsonConfig), jsonConfig);
     }
 

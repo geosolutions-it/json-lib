@@ -1588,8 +1588,68 @@ public class TestJSONObject extends TestCase {
         assertEquals("{\"key1\":\"[...]\",\"key2\":\"[title]\"}", json.toString());
     }
 
+    public void testObjectTypedStringStripsOuterSingleQuotesByDefault() {
+        Object value = "'[STATE_ABBR]'";
+        JSONObject json = new JSONObject().element("x", value);
+
+        assertEquals("[STATE_ABBR]", json.getString("x"));
+        assertEquals("{\"x\":\"[STATE_ABBR]\"}", json.toString());
+    }
+
+    public void testObjectTypedStringPreservesOuterSingleQuotesWhenCompatibilityDisabled() {
+        System.setProperty("json.compatibility.stripSingleQuotedStringValues", "false");
+        AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
+        Object value = "'[STATE_ABBR]'";
+        JSONObject json = new JSONObject().element("x", value);
+
+        assertEquals("'[STATE_ABBR]'", json.getString("x"));
+        assertEquals("{\"x\":\"'[STATE_ABBR]'\"}", json.toString());
+    }
+
+    public void testObjectTypedStringPreservesOuterDoubleQuotes() {
+        Object value = "\"STATE_ABBR\"";
+        JSONObject json = new JSONObject().element("x", value);
+
+        assertEquals("\"STATE_ABBR\"", json.getString("x"));
+        assertEquals("{\"x\":\"\\\"STATE_ABBR\\\"\"}", json.toString());
+    }
+
+    public void testObjectTypedStringStripsOuterSingleQuotesByDefaultOnAccumulate() {
+        JSONObject json = new JSONObject();
+        json.accumulate("x", "'[STATE_ABBR]'");
+        json.accumulate("x", "'[STATE_ABBR_2]'");
+
+        JSONArray values = json.getJSONArray("x");
+        assertEquals("[STATE_ABBR]", values.getString(0));
+        assertEquals("[STATE_ABBR_2]", values.getString(1));
+        assertEquals("{\"x\":[\"[STATE_ABBR]\",\"[STATE_ABBR_2]\"]}", json.toString());
+    }
+
+    public void testObjectTypedStringPreservesOuterSingleQuotesOnAccumulateWhenCompatibilityDisabled() {
+        System.setProperty("json.compatibility.stripSingleQuotedStringValues", "false");
+        AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
+        JSONObject json = new JSONObject();
+        json.accumulate("x", "'[STATE_ABBR]'");
+        json.accumulate("x", "'[STATE_ABBR_2]'");
+
+        JSONArray values = json.getJSONArray("x");
+        assertEquals("'[STATE_ABBR]'", values.getString(0));
+        assertEquals("'[STATE_ABBR_2]'", values.getString(1));
+        assertEquals("{\"x\":[\"'[STATE_ABBR]'\",\"'[STATE_ABBR_2]'\"]}", json.toString());
+    }
+
+    @Override
     protected void setUp() throws Exception {
+        super.setUp();
         jsonConfig = new JsonConfig();
+        AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
+    }
+
+    @Override
+    protected void tearDown() throws Exception {
+        System.clearProperty("json.compatibility.stripSingleQuotedStringValues");
+        AbstractJSON.reloadLegacySingleQuotedStringCompatibility();
+        super.tearDown();
     }
 
     private MorphDynaBean createDynaBean() throws Exception {

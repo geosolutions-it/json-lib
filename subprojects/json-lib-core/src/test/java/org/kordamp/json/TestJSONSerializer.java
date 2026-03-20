@@ -45,6 +45,11 @@ public class TestJSONSerializer extends TestCase {
         junit.textui.TestRunner.run(TestJSONSerializer.class);
     }
 
+    protected void tearDown() {
+        System.clearProperty(JSONTokener.LEGACY_NUMBER_COERCION_PROPERTY);
+        JSONTokener.reloadLegacyNumberCoercionCompatibility();
+    }
+
     public void testToJava_JSONArray_1() {
         // setName("JSONArray('[]') -&gt; ToJava[default]");
 
@@ -260,6 +265,23 @@ public class TestJSONSerializer extends TestCase {
         assertNotNull(json);
         assertTrue(json instanceof JSONObject);
         Assertions.assertEquals(JSONObject.fromObject("{\"name\":\"json\"}"), (JSONObject) json);
+    }
+
+    public void testToJSON_String_object_legacyNumberCoercionEnabledByDefault() {
+        JSONObject json = (JSONObject) JSONSerializer.toJSON("{\"x\":1.100000023841858}");
+
+        assertTrue(json.get("x") instanceof Double);
+        assertEquals(1.1d, json.getDouble("x"), 0d);
+    }
+
+    public void testToJSON_String_object_legacyNumberCoercionDisabled() {
+        System.setProperty(JSONTokener.LEGACY_NUMBER_COERCION_PROPERTY, "false");
+        JSONTokener.reloadLegacyNumberCoercionCompatibility();
+
+        JSONObject json = (JSONObject) JSONSerializer.toJSON("{\"x\":1.100000023841858}");
+
+        assertTrue(json.get("x") instanceof Double);
+        assertEquals(1.100000023841858d, json.getDouble("x"), 0d);
     }
 
     protected void setUp() throws Exception {

@@ -37,6 +37,20 @@ import java.util.TreeSet;
  * @author Andres Almiray
  */
 abstract class AbstractJSON implements JSON {
+    /**
+     * Compatibility switch for legacy json-lib 2.x behavior used by GeoServer
+     * integrations: object-typed String values wrapped in single quotes were
+     * normalized by stripping the outer quotes.
+     * <p>
+     * Public API exposure is available via
+     * {@link JSONObject#LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY}.
+     */
+    static final String LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY =
+        "json.compatibility.stripSingleQuotedStringValues";
+    private static volatile boolean legacySingleQuotedStringCompatibilityEnabled =
+        Boolean.parseBoolean(System.getProperty(
+            LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY,
+            "true"));
     private static final Logger LOG = LoggerFactory.getLogger(AbstractJSON.class);
     private static final WritingVisitor NORMAL = new WritingVisitor() {
         public Collection keySet(JSONObject o) {
@@ -269,6 +283,47 @@ abstract class AbstractJSON implements JSON {
                 return jsonObject;
             }
         }
+    }
+
+    /**
+     * Applies json-lib 2.x single-quote normalization rules for object-typed
+     * String values, when compatibility is enabled.
+     * <p>
+     * Controlled by {@link #LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY}
+     * (default {@code true}) for backward compatibility with json-lib 2.x /
+     * GeoServer behavior.
+     *
+     * @param value the candidate string value
+     *
+     * @return a value without outer single quotes when compatibility is enabled
+     *         and the value is enclosed in single quotes; otherwise the original
+     *         value.
+     */
+    static String normalizeLegacySingleQuotedStringValue(String value) {
+        if (isLegacySingleQuotedStringCompatibilityEnabled()
+            && value.length() >= 2
+            && value.startsWith(JSONUtils.SINGLE_QUOTE)
+            && value.endsWith(JSONUtils.SINGLE_QUOTE)) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    /**
+     * Defaults to true to preserve the historical json-lib 2.x behavior.
+     */
+    private static boolean isLegacySingleQuotedStringCompatibilityEnabled() {
+        return legacySingleQuotedStringCompatibilityEnabled;
+    }
+
+    /**
+     * Reloads the compatibility flag from the current system property value.
+     * This is mainly useful in tests that toggle the property at runtime.
+     */
+    static void reloadLegacySingleQuotedStringCompatibility() {
+        legacySingleQuotedStringCompatibilityEnabled = Boolean.parseBoolean(System.getProperty(
+            LEGACY_SINGLE_QUOTED_STRING_VALUES_PROPERTY,
+            "true"));
     }
 
     public final Writer write(Writer writer) throws IOException {
